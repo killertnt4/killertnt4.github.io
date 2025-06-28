@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legality - Legal Text Processor</title>
+    <style>
+        :root {
+            --primary: #1a365d;
+            --secondary: #2c5282;
+            --accent: #4299e1;
+            --bg: #f7fafc;
+            --text: #2d3748;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .message {
+            max-width: 80%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+        }
+        
+        .user-message {
+            align-self: flex-end;
+            background-color: var(--accent);
+            color: white;
+        }
+        
+        .bot-message {
+            align-self: flex-start;
+            background-color: white;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .citation {
+            font-size: 0.8rem;
+            color: #718096;
+            margin-top: 0.5rem;
+            border-top: 1px dashed #cbd5e0;
+            padding-top: 0.3rem;
+        }
+        
+        #input-container {
+            display: flex;
+            padding: 1rem;
+            border-top: 1px solid #e2e8f0;
+            background-color: white;
+        }
+        
+        #user-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.25rem;
+        }
+        
+        #send-button {
+            margin-left: 0.5rem;
+            padding: 0.75rem 1rem;
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 0.25rem;
+            cursor: pointer;
+        }
+        
+        .processing-indicator {
+            font-size: 0.8rem;
+            color: #718096;
+            text-align: center;
+            padding: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="user-input" placeholder="Ask about legal provisions..." />
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        // API Configuration
+        const OPENROUTER_API_KEY = "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";
+        const MODEL = "anthropic/claude-3-haiku";
+
+        // Legal text processor simulation
+        class LegalTextProcessor {
+            constructor() {
+                this.chunks = [];
+                this.loadLegalData();
+            }
+            
+            async loadLegalData() {
+                try {
+                    const response = await fetch('THE PREVENTION OF INSULTS TO NATION.txt', {
+                        headers: {
+                            'Content-Type': 'text/plain'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to load legal text');
+                    
+                    const fullText = await response.text();
+                    
+                    if (!fullText || fullText.trim().length === 0) {
+                        throw new Error("File is empty");
+                    }
+                    
+                    // Split text into logical chunks (by sections)
+                    this.chunks = fullText.split(/(?=\nSECTION|\nARTICLE|\nCHAPTER)/g)
+                        .map(chunk => chunk.trim())
+                        .filter(chunk => chunk.length > 0 && chunk.length < 3000);
+                    
+                    console.log("Processed", this.chunks.length, "legal chunks");
+                    
+                } catch (error) {
+                    console.error("Error loading legal text:", error);
+                    this.chunks = ["Error: Failed to load legal text. Please ensure:" + 
+                                 "\n1. THE PREVENTION OF INSULTS TO NATION.txt exists in the same folder" +
+                                 "\n2. File permissions allow reading" +
+                                 "\n3. You're running via http server (not file://)"];
+                }
+            }
+            
+            findRelevantChunks(query) {
+                const queryLower = query.toLowerCase();
+                const legalRef = query.match(/(SECTION|ARTICLE|CLAUSE) [\d\.]+/i)?.[0];
+                
+                // First try exact legal reference match
+                if (legalRef) {
+                    const refMatch = this.chunks.find(chunk => 
+                        chunk.includes(legalRef)
+                    );
+                    if (refMatch) return [refMatch];
+                }
+                
+                // Then try keyword matches
+                return this.chunks
+                    .filter(chunk => {
+                        const score = queryLower.split(' ')
+                            .reduce((acc, word) => 
+                                acc + (chunk.toLowerCase().includes(word) ? 1 : 0), 0);
+                        return score > 0;
+                    })
+                    .sort((a, b) => b.length - a.length) // Prefer longer chunks
+                    .slice(0, 3); // Return top 3 matches
+            }
+        }
+
+        // Chat UI handler
+        class LegalChatbot {
+            constructor() {
+                this.processor = new LegalTextProcessor();
+                this.setupEventListeners();
+            }
+            
+            setupEventListeners() {
+                document.getElementById('send-button').addEventListener('click', () => this.sendMessage());
+                document.getElementById('user-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendMessage();
+                });
+            }
+            
+            addMessage(text, isUser) {
+                const container = document.getElementById('chat-container');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+                messageDiv.textContent = text;
+                
+                if (!isUser) {
+                    const metadata = document.createElement('div');
+                    metadata.className = 'citation';
+                    metadata.textContent = 'Processed from legal database';
+                    messageDiv.appendChild(metadata);
+                }
+                
+                container.appendChild(messageDiv);
+                container.scrollTop = container.scrollHeight;
+            }
+            
+            async sendMessage() {
+                const input = document.getElementById('user-input');
+                const query = input.value.trim();
+                if (!query) return;
+                
+                input.value = '';
+                this.addMessage(query, true);
+                
+                // Show processing indicator
+                const processing = document.createElement('div');
+                processing.className = 'processing-indicator';
+                processing.textContent = 'Consulting THE PREVENTION OF INSULTS TO NATIONAL HONOUR ACT...';
+                document.getElementById('chat-container').appendChild(processing);
+                
+                // Process query
+                const relevantChunks = this.processor.findRelevantChunks(query);
+                const response = await this.generateResponse(query, relevantChunks);
+                
+                // Remove processing indicator
+                processing.remove();
+                
+                this.addMessage(response, false);
+            }
+            
+            async generateResponse(query, chunks) {
+                try {
+                    const context = chunks.length > 0 
+                        ? `Legal Context:\n${chunks.join('\n\n---\n\n')}`
+                        : "No specific legal context found";
+                    
+                    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                            "HTTP-Referer": window.location.href,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            model: MODEL,
+                            messages: [
+                                {
+                                    role: "system",
+                                    content: "You are LegalityBot, a legal AI assistant. Answer questions strictly based on the provided legal context. If unsure, say 'I cannot find a definitive answer in the legal text.'"
+                                },
+                                {
+                                    role: "user",
+                                    content: `Context:\n${context}\n\nQuestion: ${query}`
+                                }
+                            ]
+                        })
+                    });
+
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    
+                    const data = await response.json();
+                    return data.choices[0].message.content;
+                    
+                } catch (error) {
+                    console.error("API call failed:", error);
+                    return "I encountered an error processing your request. Please try again.";
+                }
+            }
+        }
+
+        // For local testing - alert if running without server
+        if (window.location.protocol === 'file:') {
+            alert("Note: For text file processing to work, you must:\n" +
+                 "1. Run this via a local web server (not file://)\n" +
+                 "2. Place THE PREVENTION OF INSULTS TO NATION.txt in same folder"); 
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            new LegalChatbot();
+        });
+    </script>
+</body>
+</html>
